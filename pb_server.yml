@@ -1,0 +1,261 @@
+--- 
+- name: Instalar sshpass e criar diretórios 
+  hosts: localhost 
+  become: true 
+  vars: 
+    ansible_dir: /home/lritzke/ansible 
+  tasks: 
+
+    - name: Instalar sshpass 
+      apt: 
+        name: sshpass 
+        state: present 
+  
+    - name: Criar diretório ansible 
+      file: 
+        path: "{{ ansible_dir }}" 
+        state: directory 
+  
+    - name: Criar arquivo index.html 
+      copy: 
+        content: | 
+          <!DOCTYPE html> 
+          <html> 
+            <head> 
+              <title>Registros</title> 
+            </head> 
+            <body> 
+              <h1>Registros</h1> 
+              <form action="http://10.0.3.29:8001/submit" method="get"> 
+                <label for="name_register">Nome:</label> 
+                <input type="text" name="name_register" id="name_register"><br> 
+                <input type="submit" value="Enviar"> 
+              </form> 
+            </body> 
+          </html> 
+        dest: /home/lritzke/index.html 
+
+- name: Configurar MySQL no servidor db 
+  hosts: db 
+  become: true 
+  vars: 
+    mysql_user: "lritzke" 
+    mysql_password: "lritzke" 
+    mysql_root_password: "lritzke" 
+  tasks: 
+
+    - name: Instalar o pip  
+      become: yes 
+      apt: 
+        name: 
+          - mysql-server 
+          - python3-mysqldb 
+          - python3-pip 
+        state: present 
+
+    - name: Instalar mysql-connector-python 
+      pip: 
+        name: mysql-connector-python 
+        state: present 
+
+    - name: Instalar flask
+      pip:
+        name: flask
+        state: present
+  
+    - name: Instalar ufw 
+      apt: 
+        name: ufw 
+        state: present 
+
+    - name: Permitir tráfego nas portas 8001 e 3306 
+      ufw: 
+        rule: allow 
+        port: "{{ item }}" 
+        comment: "{{ item }}" 
+        state: enabled 
+      loop: 
+        - 8001 
+        - 3306 
+
+    - name: Configurar bind-address no mysqld.cnf 
+      replace: 
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf 
+        regexp: "^bind-address.*" 
+        replace: "bind-address = 0.0.0.0" 
+
+    - name: Criar usuário no MySQL 
+      mysql_user: 
+        name: "lritzke" 
+        password: "lritzke" 
+        login_user: root 
+        login_password: "lritzke" 
+        state: present 
+
+    - name: Dar privilégios ao usuário no MySQL 
+      mysql_user: 
+        name: "lritzke@localhost" 
+        login_user: root 
+        login_password: "lritzke" 
+        priv: "*.*:ALL,GRANT" 
+        state: present 
+
+    - name: Limpar privilégios no MySQL 
+      mysql_query: 
+        login_user: root 
+        login_password: "lritzke" 
+        query: "FLUSH PRIVILEGES;" 
+  
+    - name: Criar banco de dados e coluna no MySQL
+      mysql_query:
+        login_user: root
+        login_password: "lritzke"
+        query: |
+          CREATE DATABASE IF NOT EXISTS registros;
+          USE registros;
+          CREATE TABLE registros ( name VARCHAR(255) NOT NULL, customer_id INT(11) NOT NULL AUTO_INCREMENT, PRIMARY KEY (customer_id));
+          GRANT ALL PRIVILEGES ON *.* TO 'lritzke'@'localhost';
+
+    - name: Criar diretório templates 
+      file: 
+        path: "/home/lritzke/ansible/templates" 
+        state: directory 
+      become: true
+      become_method: sudo 
+
+    - name: Criar arquivo submit.html 
+      copy: 
+        content: | 
+            <!DOCTYPE html>  
+            <html>  
+              <head>  
+                <meta charset="UTF-8">  
+                <title>Salvo com sucesso</title>  
+              </head>  
+              <body>  
+                <h1>Salvo com sucesso</h1>  
+              </body>  
+            </html> 
+        dest: /home/lritzke/ansible/templates/submit.html 
+
+    - name: Criar arquivo app.py
+      copy:
+        content: |
+          from flask import Flask, request, render_template
+          import mysql.connector
+
+          app = Flask(__name__, template_folder='/home/lritzke/ansible/templates')
+
+          mydb = mysql.connector.connect(
+              host="localhost",
+              port='3306',
+              user="lritzke",
+              password="lritzke",
+              database="registros"
+          )
+
+          @app.route("/")
+          def index():
+              return render_template('index.html')
+
+          @app.route("/submit", methods=["GET"])
+          def submit():
+              if request.method == 'GET':
+                  name = request.args.get("name_register")
+                  mycursor = mydb.cursor()
+                  sql = "INSERT INTO registros (name) VALUES (%s)"
+                  val = (name,)
+                  mycursor.execute(sql, val)
+                  mydb.commit()
+                  return render_template('submit.html')
+              else:
+                  return 'Método não permitido', 405
+
+          if __name__ == "__main__":
+              app.run(host="0.0.0.0", port=8001, debug=True)
+        dest: /home/lritzke/ansible/templates/app.py
+
+    - name: Instalar Python 
+      become: true 
+      apt: 
+        name: 
+          - python3 
+          - python3-pip 
+        state: latest 
+
+- name: Instalação do Apache e configuração da porta 
+  hosts: apache 
+  become: true 
+
+  tasks: 
+
+  - name: Atualizar sistema 
+    raw: apt update && apt upgrade -y 
+    become: true 
+
+  - name: Instalar o Apache 
+    apt: 
+      name: apache2 
+      state: present 
+    become: true 
+
+  - name: Configurar o arquivo de porta do Apache 
+    lineinfile: 
+      path: /etc/apache2/ports.conf 
+      regexp: '^Listen' 
+      line: 'Listen 3000' 
+
+  - name: Reiniciar o serviço do Apache 
+    service: 
+      name: apache2 
+      state: restarted 
+
+  - name: Testar a conexão com o servidor Apache 
+    wait_for: 
+      host: 127.0.0.1 
+      port: 3000 
+      state: started 
+      timeout: 5 
+
+  - name: Criar diretório conf-available se não existir 
+    file: 
+      path: /etc/apache2/conf-available 
+      state: directory 
+  
+  - name: Habilitar módulos no Apache 
+    become: true 
+    become_method: sudo  
+    command: a2enmod ssl 
+    ignore_errors: yes 
+
+  - name: Criar arquivo index.html
+    copy:
+      content: |
+        <!DOCTYPE html>
+          <html>
+            <title>Registros</title>
+          </head>
+          <body>
+            <h1>Registros</h1>
+            <form action="http://10.0.3.29:8001/submit" method="get">
+              <label for="name_register">Nome:</label>
+              <input type="text" name="name_register" id="name_register"><br>
+              <input type="submit" value="Enviar">
+            </form>
+          </body>
+        </html>
+      dest: /home/lritzke/index.html
+
+  - name: Reiniciar o serviço do Apache  
+    service:  
+      name: apache2  
+      state: restarted  
+  
+  - name: Copiar arquivo index.html para o diretório de documentos do Apache  
+    copy:  
+      src: /home/lritzke/index.html  
+      dest: /var/www/html/index.html
+
+  - name: Oque fazer para iniciar o servidor
+    debug:
+      msg: "Primeiramente abra dois terminais em um entre no ubuntu1 com ssh ubuntu1 e no outro entre no ubuntu3 com lxc-attach -n container_ubuntu_03 dentro do ubuntu1 inicie o servidor com o seguinte comando << cd /var/www/html >> depois << python3 -m http.server >> e no ubuntu3 colocar << python3 /home/lritzke/ansible/templates/app.py >> e depois entre no navegador e coloque o seguite link http://ip_da_maquina_ubuntu1:8000 assim ira entrar no servidor e logo ira salvar no banco"
