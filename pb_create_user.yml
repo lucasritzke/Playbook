@@ -1,0 +1,82 @@
+---
+
+- name: playbook para testes
+
+  hosts: localhost
+
+  gather_facts: yes
+
+  become: yes
+
+  vars:
+
+    - user_name: "ritzke"
+
+  tasks:
+
+    - name: Verificar se usuário existe
+      become: true
+      shell: getent passwd "{{user_name}}"
+      register: user_info
+      ignore_errors: true
+
+    - name: Falhar se usuário não existir
+      fail:
+        msg: "O usuário {{user_name}} não existe na máquina"
+      when: user_info.rc != 0
+
+- name: inicio playbook 
+
+  hosts: ubuntu2
+
+  gather_facts: yes
+
+  become: yes
+
+  vars:
+
+    - user_name: "ritzke"
+
+  tasks:
+    - name: display infos
+
+      debug:
+
+        msg: "hostname: {{ ansible_nodename }} OS: {{ ansible_os_family }}"
+
+    - name: Add a user
+      
+      ansible.builtin.user:
+
+        name: "{{user_name}}"
+
+        shell: /bin/bash
+
+
+
+    - name: apply sudoers template
+
+      ansible.builtin.template:
+
+        src: sudoers.j2
+
+        dest: /etc/sudoers.d/{{user_name}}
+
+        owner: root
+
+        group: root
+
+        mode: '0440'
+
+      loop: "{{ [{'name': user_name}] }}"
+
+    - name: Set authorized key for {{user_name}}
+
+      authorized_key:
+
+        user: "{{user_name}}"
+
+        state: present
+
+        key: "{{ lookup('file', '/home/{{user_name}}/.ssh/id_rsa.pub') }}"
+
