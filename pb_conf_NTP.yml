@@ -1,0 +1,32 @@
+---
+- hosts: app
+  gather_facts: yes
+  become: yes
+
+  vars_files:
+
+    - /home/lritzke/ansible/timezone
+
+
+  tasks:
+
+    - name: Instalar pacote NTP
+      package:
+        name: ntp
+        state: latest
+
+    - name: Configurar fuso horário
+      timezone:
+        name: "{{ timezone_input }}"
+
+    - name: Configurar servidor NTP
+      lineinfile:
+        path: /etc/ntp.conf
+        line: "server ntp.example.com iburst"
+      notify: restart ntp
+
+  handlers:
+    - name: restart ntp
+      service:
+        name: ntp
+        state: restarted

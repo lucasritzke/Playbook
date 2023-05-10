@@ -1,0 +1,39 @@
+---
+- name: Trocar fuso horário de uma máquina
+  hosts: app
+  become: true
+
+  vars:
+    timezones:
+      - "America/Sao_Paulo"
+      - "Europe/Berlin"
+      - "Asia/Tokyo"
+      - "Australia/Sydney"
+
+  tasks:
+    - name: Perguntar ao usuário qual fuso horário deseja
+      pause:
+        prompt: "Qual fuso horário deseja usar? {{ timezones }}\n"
+      register: timezone_input
+
+    - name: Verificar se o fuso horário escolhido é válido
+      fail:
+        msg: "Fuso horário inválido. Escolha uma opção da lista: {{ timezones }}"
+      when: timezone_input.user_input not in timezones
+
+    - name: Armazenar o fuso horário selecionado
+      set_fact:
+        timezone: "{{ timezone_input.user_input }}"
+
+    - name: Trocar o fuso horário para {{ timezone }}
+      command: sudo timedatectl set-timezone {{ timezone }}
+      register: result
+
+    - name: Exibir mensagem de sucesso ou erro
+      debug:
+        msg: "Fuso horário alterado para {{ timezone }}"
+      when: result.rc == 0
+    - debug:
+        msg: "Erro ao alterar fuso horário: {{ result.stderr }}"
+      when: result.rc != 0
+

@@ -1,0 +1,24 @@
+---
+- name: Copiar arquivo para máquina remota
+  hosts: app 
+  become: true
+
+  vars_prompt:
+    - name: local_file_path
+      prompt: "Digite o caminho absoluto do arquivo no localhost: "
+      private: false
+
+  vars:
+    remote_file_path: /home/lritzke/files
+
+  tasks:
+    - name: Copiar arquivo para máquina remota
+      copy:
+        src: "{{ local_file_path }}"
+        dest: "{{ remote_file_path }}"
+
+    - name: mensagem de sucesso
+      debug:
+        msg: "Seu arquivo foi copiado para o servidor app no local /home/lritzke/files"
+
+
