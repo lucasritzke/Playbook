@@ -1,0 +1,35 @@
+- name: Criação de usuário e chave SSH
+  hosts: app
+  gather_facts: yes
+  become: true
+
+  vars:
+    username: "lucas"
+    password: "lucas"
+
+  tasks:
+    - name: Criar usuário "{{ username }}"
+      become: true
+      user:
+        name: "{{ username }}"
+        shell: /bin/bash
+        password: "{{ password | password_hash('sha512', 'mysecretsalt') }}"
+        update_password: always
+        comment: ",,,"
+        createhome: yes
+
+    - name: Adicionar {{ username }} ao grupo sudo
+      become: true
+      user:
+        name: "{{ username }}"
+        groups: sudo
+        append: yes
+
+    - name: Adicionar entrada no visudo
+      become: true
+      lineinfile:
+        dest: /etc/sudoers
+        line: "{{ username }} ALL=(ALL) NOPASSWD:ALL"
+        validate: "visudo -cf %s"
+        state: present
+
