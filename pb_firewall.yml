@@ -1,0 +1,28 @@
+---
+- name: Configuracao e firewall
+  hosts: app
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Instalar o iptables
+      apt:
+        name: iptables-persistent
+        state: present
+
+    - name: Limpar regras
+      shell: iptables -F
+
+    - name: Configuracao de porta
+      shell: |
+        iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+        iptables -A INPUT -j DROP
+
+    - name: garante que o firewall seja carregado
+      shell: iptables-save > /etc/iptables/rules.v4
+
+  handlers:
+    - name: reiniciar o iptables
+      service:
+        name: iptables
+        state: restarted
