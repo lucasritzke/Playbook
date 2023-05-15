@@ -1,0 +1,80 @@
+- name: Configurar proxy reverso e servidores Apache
+  hosts: ubuntu2
+  become: true
+  tasks:
+    - name: Instalar o servidor Apache
+      apt:
+        name: apache2
+        state: present
+
+    - name: Copiar arquivo index.html para o servidor1
+      copy:
+        content: "<h1>Server one</h1>"
+        dest: /var/www/html/index.html
+      notify: Reiniciar Apache
+
+    - name: Criar diretorio para o servidor2
+      file:
+        path: /var/www/html/servidor2
+        state: directory
+        mode: '0755'
+
+    - name: Copiar arquivo index.html para o servidor2
+      copy:
+        content: "<h1>Server two</h1>"
+        dest: /var/www/html/servidor2/index.html
+      notify: Reiniciar Apache
+
+    - name: Criar diretorio para o servidor3
+      file:
+        path: /var/www/html/servidor3
+        state: directory
+        mode: '0755'
+
+    - name: Copiar arquivo index.html para o servidor3
+      copy:
+        content: "<h1>Server three</h1>"
+        dest: /var/www/html/servidor3/index.html
+      notify: Reiniciar Apache
+
+    - name: Criar arquivo de configuração do proxy reverso
+      copy:
+        content: |
+              <VirtualHost *:8081>
+                  ServerName proxy.sv1_lritzke_servers
+
+                  DocumentRoot /var/www/html/servidor2
+
+                  ProxyPass /servidor2 http://10.0.3.211:8081/
+                  ProxyPassReverse /servidor2 http://10.0.3.211:8081/
+              </VirtualHost>
+  
+              <VirtualHost *:8082>
+                  ServerName proxy.From_lritzke_servers
+
+                  DocumentRoot /var/www/html/servidor3
+
+                  ProxyPass /servidor3 http://10.0.3.211:8082/
+                  ProxyPassReverse /servidor3 http://10.0.3.211:8082/
+              </VirtualHost>
+        dest: "/etc/apache2/sites-available/proxy-reverso.conf"
+      notify: Reiniciar Apache
+
+    - name: corrigindo configuracoes
+      shell: apachectl configtest
+      notify: Reiniciar Apache
+
+    - name: Habilitar módulo proxy reverso
+      command: a2enmod proxy
+      notify: Reiniciar Apache
+
+    - name: Habilitar o site do proxy reverso
+      command: a2ensite proxy-reverso.conf
+      notify: Reiniciar Apache
+
+  handlers:
+    - name: Reiniciar Apache
+      service:
+        name: apache2
+        state: restarted
+
