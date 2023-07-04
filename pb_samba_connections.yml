@@ -1,0 +1,73 @@
+---
+- name: Configurar Samba e pasta compartilhada
+  hosts: localhost
+  become: yes
+
+  tasks:
+    - name: Atualizar o sistema
+      apt:
+        update_cache: yes
+      become: yes
+
+    - name: Instalar o Samba
+      apt:
+        name: samba
+        state: present
+      become: yes
+
+    - name: Criar a pasta compartilhada
+      file:
+        path: /share
+        state: directory
+        owner: lritzke
+        group: lritzke
+        mode: "0777"
+      become: yes
+
+    - name: Adicionar configuração ao smb.conf
+      lineinfile:
+        path: /etc/samba/smb.conf
+        line: |
+          [share]
+            comment = Pasta compartilhada para o usuário lritzke
+            path = /share
+            guest ok = yes
+            read only = no
+      become: yes
+
+    - name: Reiniciar o serviço Samba
+      service:
+        name: smbd
+        state: restarted
+      become: yes
+
+    - name: Permitir o serviço Samba no firewall (TCP)
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+      with_items:
+        - 137
+        - 138
+        - 139
+        - 445
+      become: yes
+
+    - name: Permitir o serviço Samba no firewall (UDP)
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: udp
+      with_items:
+        - 137
+        - 138
+      become: yes
+
+  post_tasks:
+    - name: Fazer a conexao no Windows
+      debug:
+        msg: |
+          Para acessar a pasta compartilhada no Windows, siga os passos abaixo:
+          1. Abra o File Explorer no Windows.
+          2. Na barra de endereços, digite o endereço IP do servidor Ubuntu, seguido por "\share":
+             Exemplo: \\192.168.1.5\share
+          3. Pressione Enter.

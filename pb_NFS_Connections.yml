@@ -1,0 +1,68 @@
+---
+- name: NFS setup
+  hosts: localhost
+  become: true
+  tasks:
+    - name: Update APT cache
+      apt:
+        update_cache: yes
+
+    - name: Instalar o NFS 
+      apt:
+        name: ufw
+        state: present
+
+    - name: Install nfs-kernel-server
+      apt:
+        name: nfs-kernel-server
+        state: present
+
+    - name: Criar o diretorio /mnt/nfs_share 
+      file:
+        path: /mnt/nfs_share
+        state: directory
+
+    - name: Setar permissoes /mnt/nfs_share directory
+      file:
+        path: /mnt/nfs_share
+        owner: nobody
+        group: nogroup
+        state: directory
+
+    - name: Setar permissoes /mnt/nfs_share directory
+      file:
+        path: /mnt/nfs_share
+        mode: "0777"
+        state: directory
+
+    - name: adicionar o nfs exports /etc/exports
+      lineinfile:
+        path: /etc/exports
+        line: "/mnt/nfs_share 192.168.1.7/24(rw,sync,no_subtree_check)"
+      notify: Restart NFS
+
+    - name: Abrir conexao com a outra maquina
+      ufw:
+        rule: allow
+        from_ip: 192.168.1.7/24
+        to_port: nfs
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+
+    - name: UFW status
+      command: ufw status
+      register: ufw_status
+    - debug:
+        var: ufw_status.stdout_lines
+
+    - name: Menssagem de saida
+      debug:
+        msg: "A parte da maquina server esta pronta agora para funcionar na maquina cliente do ip 192.168.1.7 entre na maquina e execute os seguintes comandos 1.sudo apt update  2.sudo apt install nfs-common  3. sudo mkdir -p mnt/nfs_clientshare  4. sudo mount 192.168.1.5:/mnt/nfs_share /mnt/nfs_clientshare assim ja ira funcionar ou copie o playbook do  arquivo /home/lritzke/pb_nfs.yml e inicie o na outra maquina com ansible-playbook pb_nfs.yml"
+
+  handlers:
+    - name: Restart NFS
+      service:
+        name: nfs-kernel-server
+        state: restarted
