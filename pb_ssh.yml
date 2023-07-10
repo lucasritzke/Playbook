@@ -1,0 +1,220 @@
+---
+- name: Configuração de Máquinas LXC e SSH
+  hosts: localhost
+  become: true
+
+  tasks:
+    - name: carregar variaveis do arquivo 
+      include_vars:
+        file: /home/lritzke/ansible/add_user.yml
+
+    - name: Atualizar sistema
+      apt:
+        update_cache: yes
+      when: ansible_os_family == 'Debian'
+
+    - name: Instalar pacotes do LXC
+      apt:
+        name: lxc-templates
+        state: present
+      when: ansible_os_family == 'Debian'
+
+    - name: Criar containers LXC
+      shell: |
+        sudo lxc-create -t ubuntu -n "Container_Ubuntu_{{ item }}"
+      loop: "{{ range(1, 4) }}"
+      when: item | int <= 3
+      ignore_errors: yes
+
+    - name: Verificar se container já existe
+      shell: sudo lxc-info -n "Container_Ubuntu_{{ item }}" 2>/dev/null
+      ignore_errors: yes
+      register: container_info
+      loop: "{{ range(1, 4) }}"
+      when: item | int <= 3
+
+    - name: Iniciar containers LXC
+      shell: |
+        sudo lxc-start -n "Container_Ubuntu_{{ item }}" -d
+      loop: "{{ range(1, 4) }}"
+
+    - name: Pausa de 7 segundos
+      pause:
+        seconds: 7
+
+    - name: Obter IPs dos containers
+      shell: sudo lxc-ls --fancy | awk '/RUNNING/ {print $5}'
+      register: lxc_ips
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Adicionar IPs dos containers no arquivo /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ item }} ubuntu{{ index + 1 }}"
+      loop: "{{ lxc_ips.stdout_lines }}"
+      loop_control:
+        index_var: index
+
+    - name: Setar IPs em variáveis
+      set_fact:
+        container_ip_1: "{{ lxc_ips.stdout_lines[0] }}"
+        container_ip_2: "{{ lxc_ips.stdout_lines[1] }}"
+        container_ip_3: "{{ lxc_ips.stdout_lines[2] }}"
+
+    - name: Configurar SSH e testar conexão nos containers
+      block:
+        - name: Habilitar autenticação por senha no ssh_config
+          lineinfile:
+            path: "/var/lib/lxc/Container_Ubuntu_{{ item }}/rootfs/etc/ssh/ssh_config"
+            line: PasswordAuthentication yes
+          become: true
+          loop: "{{ range(1, 4) }}"
+
+        - name: Permitir login do root via SSH no sshd_config
+          lineinfile:
+            path: "/var/lib/lxc/Container_Ubuntu_{{ item }}/rootfs/etc/ssh/sshd_config"
+            line: PermitRootLogin yes
+          become: true
+          loop: "{{ range(1, 4) }}"
+
+        - name: Setar senha do root nos containers
+          shell: echo "root:lritzke" | sudo chroot /var/lib/lxc/Container_Ubuntu_{{ item }}/rootfs chpasswd
+          loop: "{{ range(1, 4) }}"
+
+        - name: Reiniciar os containers
+          shell: |
+            sudo lxc-stop -n "Container_Ubuntu_{{ item }}"
+            sudo lxc-start -n "Container_Ubuntu_{{ item }}"
+          become: true
+          loop: "{{ range(1, 4) }}"
+
+        - name: Pausa de 7 segundos
+          pause:
+            seconds: 7
+
+        - name: Criar chave SSH
+          shell: ssh-keygen -t rsa -N "" -f /root/.ssh/id_rsa
+          args:
+            creates: "/root/.ssh/id_rsa"
+
+        - name: Pausa de 10 segundos
+          pause:
+            seconds: 10
+
+        - name: criar conexao sem senha 
+          shell: ssh-copy-id root@ubuntu{{ item }}
+          become: true
+          loop: "{{ range(1, 4) }}"
+
+        - name: Verificar se usuário existe
+          become: true
+          shell: getent passwd "{{user_name}}"
+          register: user_info
+          ignore_errors: true
+ 
+        - name: Falhar se usuário não existir
+          fail:
+            msg: "O usuário {{user_name}} não existe na máquina"
+          when: user_info.rc != 0
+
+        - name: Install sshpass
+          become: true
+          apt:
+            name: sshpass
+            state: present
+          when: ansible_os_family == 'Debian'
+ 
+        - name: Restart SSH service
+          ansible.builtin.service:
+            service:
+              name: sshd
+              state: restarted
+
+        - name: Atualizar sistema
+          apt:
+            update_cache: yes
+          when: ansible_os_family == 'Debian'
+
+- name: inicio playbook
+  hosts: all 
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: carregar variaveis do arquivo
+      include_vars:
+        file: /home/lritzke/ansible/add_user.yml
+
+    - name: display infos
+      debug:
+        msg: "hostname: {{ ansible_nodename }} OS: {{ ansible_os_family }}"
+
+    - name: Add a user
+      ansible.builtin.user:
+        name: "lritzke"
+        shell: /bin/bash
+
+    - name: Create directory ansible
+      ansible.builtin.file:
+        path: "/home/{{user_name}}/ansible"
+        state: directory
+
+    - name: Create or overwrite sudoers.j2 file
+      ansible.builtin.copy:
+        content: "{{user_name}} ALL=(ALL) NOPASSWD: ALL"
+        dest: "/etc/sudoers.d/{{ user_name }}"
+        owner: root
+        group: root
+        mode: '0440'
+
+- name: Configuração de Máquinas LXC e SSH
+  hosts: localhost
+  become: true
+
+  tasks: 
+      - name: carregar variaveis do arquivo
+        include_vars:
+          file: /home/lritzke/ansible/add_user.yml
+
+      - name: Setar senha do root nos containers
+        shell: echo "{{user_name}}:{{user_name}}" | sudo chroot /var/lib/lxc/Container_Ubuntu_{{ item }}/rootfs chpasswd
+        loop: "{{ range(1, 4) }}"
+
+      - name: Reiniciar os containers
+        shell: |
+          sudo lxc-stop -n "Container_Ubuntu_{{ item }}"
+          sudo lxc-start -n "Container_Ubuntu_{{ item }}"
+        become: true
+        loop: "{{ range(1, 4) }}"
+
+      - name: Criar chave SSH
+        shell: ssh-keygen -t rsa -N "" -f /home/{{user_name}}/.ssh/id_rsa
+        args:
+          creates: "/home/{{user_name}}/.ssh/id_rsa"
+
+      - name: criar conexao sem senha 
+        shell: ssh-copy-id {{user_name}}@ubuntu{{ item }}
+        become: true
+        loop: "{{ range(1, 4) }}"
+
+      - name: chmod nas pastas
+        become: true 
+        shell: sudo chmod 777 "/home/{{user_name}}/.ssh" && sudo chmod 777 "/home/{{user_name}}/.ssh/id_rsa"
+
+
+- name: inicio playbook
+  hosts: all 
+  gather_facts: yes
+  become: yes
+
+  tasks:
+    - name: carregar variaveis do arquivo
+      include_vars:
+        file: /home/lritzke/ansible/add_user.yml
+
+    - name: Set authorized key for {{user_name}}
+      authorized_key:
+        user: "{{user_name}}"
+        state: present
+        key: "{{ lookup('file', '/home/' + user_name + '/.ssh/id_rsa.pub') }}"
